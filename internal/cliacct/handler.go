@@ -26,6 +26,8 @@ func (h *Handlers) Mount(r chi.Router) {
 		r.Get("/", h.list)
 		r.Post("/", h.create)
 		r.Post("/import-local", h.importLocal)
+		r.Get("/policy", h.getPolicy)
+		r.Put("/policy", h.putPolicy)
 		r.Route("/{id}", func(r chi.Router) {
 			r.Get("/", h.get)
 			r.Put("/", h.update)

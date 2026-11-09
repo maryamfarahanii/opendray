@@ -2,6 +2,7 @@ package session
 
 import (
 	"context"
+	"sync"
 	"time"
 
 	"github.com/opendray/opendray-v2/internal/eventbus"
@@ -39,23 +40,57 @@ func (m *Manager) tryRateLimitFailover(rs *runningSession, now time.Time) {
 	rs.sessMu.RLock()
 	sessID := rs.sess.ID
 	currentAccountID := rs.sess.ClaudeAccountID
+	workDir := rs.sess.EffectiveWorkDir()
+	claudeID := rs.sess.ClaudeSessionID
 	rs.sessMu.RUnlock()
+
+	// One attempt per session at a time: the regular scan, the trailing
+	// scan and the freshness retries below can otherwise overlap.
+	if _, busy := failoverInflight.LoadOrStore(sessID, struct{}{}); busy {
+		return
+	}
+	defer failoverInflight.Delete(sessID)
+
+	// --resume re-renders the old banner under the new account; the same
+	// reset instant means it is that echo, not a fresh limit.
+	if prev, seen := failoverHandled.Load(sessID); seen && prev.(time.Time).Equal(reset) {
+		return
+	}
+
+	// The PTY often shows the banner a moment before Claude flushes the
+	// matching transcript line, so give the transcript a few seconds.
+	fresh := false
+	for i := 0; i < limitFreshRetries; i++ {
+		if i > 0 {
+			time.Sleep(limitFreshRetryDelay)
+		}
+		if limitIsFresh(m.claudeHistoryCfg, workDir, claudeID, time.Now()) {
+			fresh = true
+			break
+		}
+	}
+	if !fresh {
+		m.log.Info("rate-limit banner seen but transcript has no fresh limit; skipping failover",
+			"session", sessID, "current_account", currentAccountID, "reset", reset.Format(time.RFC3339))
+		return
+	}
 
 	// MVP: don't try to fail over from the empty-id default. The
 	// scanner has no clean way to resolve it without another DB hop
 	// the resolver interface deliberately doesn't expose.
 	if currentAccountID == "" {
+		m.log.Warn("rate-limit hit on a session with no pinned account; skipping failover", "session", sessID)
 		return
 	}
 
-	// Don't re-fire on the same throttle window — if the banner is
-	// still in the rolling buffer after a successful failover, the
-	// new account's session shouldn't get switched away again.
-	if m.claudeAccounts.IsClaudeAccountThrottled(currentAccountID) {
-		return
+	// The account may already be marked throttled by ANOTHER session
+	// that hit the same limit first; this session still has to move.
+	// Echo re-fires of this session are stopped by failoverHandled and
+	// limitIsFresh above, so a throttled mark is no reason to stay.
+	failoverHandled.Store(sessID, reset)
+	if !m.claudeAccounts.IsClaudeAccountThrottled(currentAccountID) {
+		m.claudeAccounts.MarkClaudeAccountThrottled(currentAccountID, reset)
 	}
-
-	m.claudeAccounts.MarkClaudeAccountThrottled(currentAccountID, reset)
 	m.log.Info("claude rate-limit detected, attempting failover",
 		"session", sessID,
 		"current_account", currentAccountID,
@@ -115,6 +150,7 @@ func (m *Manager) tryRateLimitFailover(rs *runningSession, now time.Time) {
 	}
 
 	rs.clearRateLimitWindow()
+	go m.continueAfterFailover(sessID)
 	m.log.Info("auto-failover succeeded",
 		"session", sessID,
 		"from_account", currentAccountID,
@@ -132,4 +168,45 @@ func (m *Manager) tryRateLimitFailover(rs *runningSession, now time.Time) {
 			},
 		})
 	}
+}
+
+// failoverHandled remembers, per session, the reset instant of the banner
+// that last triggered a switch.
+var failoverHandled sync.Map
+
+// failoverInflight holds the sessions with a failover attempt running.
+var failoverInflight sync.Map
+
+const (
+	limitFreshRetries    = 6
+	limitFreshRetryDelay = 2 * time.Second
+)
+
+// failoverContinuePrompt restarts the turn the limit interrupted.
+const failoverContinuePrompt = "ادامه بده"
+
+// continueAfterFailover waits for the resumed TUI's input box and submits
+// a continue prompt, so the operator doesn't have to notice the switch.
+func (m *Manager) continueAfterFailover(sessID string) {
+	// Long enough for the operator to answer a first-use trust prompt.
+	ctx, cancel := context.WithTimeout(context.Background(), 11*time.Minute)
+	defer cancel()
+	for i := 0; i < 300; i++ {
+		time.Sleep(2 * time.Second)
+		screen := m.RecentScreen(sessID)
+		if parseScreenPrompt(screen) != nil || !screenInputReady(screen) {
+			continue
+		}
+		time.Sleep(time.Second)
+		if err := m.Input(ctx, sessID, []byte("\x1b[200~"+failoverContinuePrompt+"\x1b[201~")); err != nil {
+			m.log.Warn("failover continue prompt failed", "session", sessID, "err", err)
+			return
+		}
+		time.Sleep(350 * time.Millisecond)
+		if err := m.Input(ctx, sessID, []byte{'\r'}); err != nil {
+			m.log.Warn("failover continue submit failed", "session", sessID, "err", err)
+		}
+		return
+	}
+	m.log.Warn("failover: resumed session never became ready", "session", sessID)
 }

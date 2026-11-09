@@ -199,6 +199,7 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Termi
     term.loadAddon(fit)
     term.loadAddon(links)
     term.open(containerRef.current)
+    const stopRtlRows = watchRtlRows(containerRef.current)
     fit.fit()
     xtermRef.current = term
     fitRef.current = fit
@@ -476,6 +477,7 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Termi
       vv?.removeEventListener('resize', scheduleFit)
       vv?.removeEventListener('scroll', scheduleFit)
       ws.close()
+      stopRtlRows()
       term.dispose()
       xtermRef.current = null
       fitRef.current = null
@@ -627,3 +629,32 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Termi
     </div>
   )
 })
+
+// xterm's DOM renderer gives every glyph whose width differs from the
+// cell its own inline-block span. Persian falls back to a proportional
+// font, so each letter becomes an isolated box: the browser can no
+// longer run the bidi algorithm across the line, words come out left to
+// right and letters stop joining. Rows that contain RTL text are marked
+// so CSS can turn their spans back into plain inline runs.
+const RTL_CHARS = /[\u0590-\u08FF\uFB1D-\uFDFF\uFE70-\uFEFF]/
+function watchRtlRows(host: HTMLElement): () => void {
+  let obs: MutationObserver | null = null
+  let timer: ReturnType<typeof setTimeout> | null = null
+  const mark = (rows: Element) => {
+    for (const r of Array.from(rows.children)) {
+      r.classList.toggle('od-rtl-row', RTL_CHARS.test(r.textContent ?? ''))
+    }
+  }
+  const attach = () => {
+    const rows = host.querySelector('.xterm-rows')
+    if (!rows) { timer = setTimeout(attach, 100); return }
+    mark(rows)
+    obs = new MutationObserver(() => mark(rows))
+    obs.observe(rows, { childList: true, subtree: true, characterData: true })
+  }
+  attach()
+  return () => {
+    if (timer) clearTimeout(timer)
+    obs?.disconnect()
+  }
+}

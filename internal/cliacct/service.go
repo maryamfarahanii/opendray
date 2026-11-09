@@ -289,6 +289,9 @@ func (s *Service) pickClaudeAccount(ctx context.Context, avoid string) (string, 
 	if avoid != "" {
 		throttled[avoid] = true
 	}
+	if pol := loadPolicy(); pol.Mode == PolicyPriority {
+		return pickByPriority(pol, rows, throttled), nil
+	}
 	// Count viable enabled accounts (enabled AND not throttled AND
 	// not the avoid id). With <2 there's no balancing to do — leave
 	// the empty-id fallback to the caller.
@@ -447,8 +450,17 @@ func (s *Service) Update(ctx context.Context, id string, req UpdateRequest) (Acc
 }
 
 func (s *Service) Delete(ctx context.Context, id string) error {
+	acct, getErr := s.store.Get(ctx, id)
 	if err := s.store.Delete(ctx, id); err != nil {
 		return err
+	}
+	// The watcher re-registers any token file it finds, so a deleted
+	// account would come straight back if its token stayed on disk.
+	if getErr == nil && acct.TokenPath != "" {
+		tokens := filepath.Join(s.resolveAccountsDir(), "tokens") + string(filepath.Separator)
+		if strings.HasPrefix(acct.TokenPath, tokens) {
+			_ = os.Remove(acct.TokenPath)
+		}
 	}
 	// Forget identity-drift baseline so a recreate doesn't carry
 	// stale drift across deletion. Best-effort: a missing file or
@@ -771,6 +783,7 @@ func (s *Service) ResolveSpawnCreds(ctx context.Context, id string) (configDir, 
 	if !a.Enabled {
 		return "", "", ErrDisabled
 	}
+	ensureAccountHome(a.ConfigDir)
 	return selectSpawnCreds(a.Name, a.ConfigDir, a.TokenPath)
 }
 

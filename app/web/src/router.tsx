@@ -8,6 +8,7 @@ import {
 import { AppShell } from '@/components/AppShell'
 import { LoginPage } from '@/pages/Login'
 import { SessionsPage } from '@/pages/Sessions'
+import { ChatPage } from '@/pages/Chat'
 import { ProvidersPage } from '@/pages/Providers'
 import { ChannelsPage } from '@/pages/Channels'
 import { IntegrationsPage } from '@/pages/Integrations'
@@ -66,11 +67,25 @@ const canvasPopoutRoute = createRoute({
   }),
 })
 
+// Claude-style chat: full window, a sibling of the shell like the canvas.
+const chatRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: '/chat',
+  beforeLoad: ({ location }) => {
+    if (!useAuth.getState().isAuthed()) {
+      throw redirect({ to: '/login', search: { next: location.pathname } })
+    }
+  },
+  component: ChatPage,
+  validateSearch: (search): { c?: string } =>
+    typeof search.c === 'string' ? { c: search.c } : {},
+})
+
 const indexRoute = createRoute({
   getParentRoute: () => protectedRoute,
   path: '/',
   beforeLoad: () => {
-    throw redirect({ to: '/sessions' })
+    throw redirect({ to: '/chat' })
   },
 })
 
@@ -274,6 +289,7 @@ const roundTableRoute = createRoute({
 const routeTree = rootRoute.addChildren([
   loginRoute,
   canvasPopoutRoute,
+  chatRoute,
   protectedRoute.addChildren([
     indexRoute,
     sessionsRoute,

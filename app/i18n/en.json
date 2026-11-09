@@ -28,6 +28,7 @@
     "errorFallback": "Login failed"
   },
   "nav": {
+    "chat": "Chat",
     "sessions": "Sessions",
     "memory": "Memory",
     "more": "More",

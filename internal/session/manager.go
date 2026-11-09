@@ -386,6 +386,11 @@ type runningSession struct {
 	rlMu       sync.Mutex
 	rlWindow   []byte
 	rlLastScan time.Time
+	// rlTrailing is set while a deferred scan is queued for output
+	// that arrived inside the cooldown. The limit banner is usually the
+	// last thing the TUI prints, so without it a banner that lands
+	// <5s after the previous scan would never be scanned at all.
+	rlTrailing bool
 
 	endOnce sync.Once
 	endedCh chan struct{}
@@ -405,9 +410,10 @@ const (
 
 // appendRateLimitWindow appends chunk to the rolling rate-limit
 // window, truncating from the front when the size exceeds the cap.
-// Returns true if enough time has elapsed since the last scan that
-// the caller should now run ScanForRateLimitBanner against rlWindow.
-func (rs *runningSession) appendRateLimitWindow(chunk []byte, now time.Time) bool {
+// Returns scan=true if enough time has elapsed since the last scan that
+// the caller should now run ScanForRateLimitBanner against rlWindow;
+// otherwise trailingIn>0 asks the caller to queue one deferred scan.
+func (rs *runningSession) appendRateLimitWindow(chunk []byte, now time.Time) (scan bool, trailingIn time.Duration) {
 	rs.rlMu.Lock()
 	defer rs.rlMu.Unlock()
 	rs.rlWindow = append(rs.rlWindow, chunk...)
@@ -415,6 +421,23 @@ func (rs *runningSession) appendRateLimitWindow(chunk []byte, now time.Time) boo
 		// Slide: keep the most recent rateLimitWindowBytes.
 		rs.rlWindow = rs.rlWindow[len(rs.rlWindow)-rateLimitWindowBytes:]
 	}
+	if elapsed := now.Sub(rs.rlLastScan); elapsed < rateLimitScanCooldown {
+		if rs.rlTrailing {
+			return false, 0
+		}
+		rs.rlTrailing = true
+		return false, rateLimitScanCooldown - elapsed
+	}
+	rs.rlLastScan = now
+	return true, 0
+}
+
+// startTrailingRateLimitScan claims the queued deferred scan; it
+// reports false when a regular scan already ran in the meantime.
+func (rs *runningSession) startTrailingRateLimitScan(now time.Time) bool {
+	rs.rlMu.Lock()
+	defer rs.rlMu.Unlock()
+	rs.rlTrailing = false
 	if now.Sub(rs.rlLastScan) < rateLimitScanCooldown {
 		return false
 	}

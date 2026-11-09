@@ -28,6 +28,7 @@
     "errorFallback": "Error al iniciar sesión"
   },
   "nav": {
+    "chat": "Chat",
     "sessions": "Sessions",
     "memory": "Memoria",
     "more": "Más",

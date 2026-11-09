@@ -40,7 +40,7 @@ export function LoginPage() {
         skipAuthRedirect: true,
       })
       setSession(res.token, res.username, res.expires_at)
-      navigate({ to: search.next || '/sessions' })
+      navigate({ to: search.next || '/chat' })
     } catch (err) {
       const message =
         err instanceof APIError

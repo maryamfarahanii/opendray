@@ -1022,6 +1022,9 @@ func (sp *SessionProvider) Resolve(ctx context.Context, id string) (session.Prov
 		if len(out.Env) == 0 {
 			out.Env = nil
 		}
+		if providerID == "claude" {
+			out.Args = mergeAppendSystemPrompts(append(out.Args, "--append-system-prompt", chatNextStepPrompt))
+		}
 		return out, nil
 	}
 	return info, nil

@@ -213,6 +213,12 @@ func NewHandlers(svc Service, log *slog.Logger, opts ...HandlerOption) *Handlers
 // terminal row; POST /{id}/stop terminates the process but keeps the
 // row; DELETE /{id} terminates and removes.
 func (h *Handlers) Mount(r chi.Router) {
+	r.Get("/chat-meta", h.getChatMeta)
+	r.Put("/chat-meta", h.putChatMeta)
+	r.Get("/chat-usage", h.chatUsage)
+	r.Get("/chat-activity", h.chatActivity)
+	r.Get("/old-chats", h.oldChats)
+	r.Post("/old-chats/{claudeID}/import", h.importOldChat)
 	r.Route("/sessions", func(r chi.Router) {
 		r.Get("/", h.list)
 		r.Post("/", h.create)
@@ -226,6 +232,7 @@ func (h *Handlers) Mount(r chi.Router) {
 			r.Get("/buffer", h.buffer)
 			r.Get("/stream", h.stream)
 			r.Get("/history", h.history)
+			r.Get("/conversation", h.conversation)
 			r.Patch("/claude-account", h.switchClaudeAccount)
 			r.Patch("/antigravity-account", h.switchAntigravityAccount)
 			r.Patch("/grok-account", h.switchGrokAccount)
@@ -555,7 +562,7 @@ func (h *Handlers) streamCloseEnded(w http.ResponseWriter, r *http.Request) {
 
 // uploadMaxBytes caps each /uploads request — Claude Code can read
 // images up to a few MB; bigger payloads are usually a mistake.
-const uploadMaxBytes = 16 * 1024 * 1024 // 16 MiB
+const uploadMaxBytes = 64 * 1024 * 1024 // 64 MiB
 
 // upload handles POST /sessions/{id}/uploads. The body is a multipart
 // form with a "file" part. The bytes are saved to a per-session
@@ -629,7 +636,9 @@ func (h *Handlers) upload(w http.ResponseWriter, r *http.Request) {
 func normalizeUploadExt(filename string) string {
 	ext := strings.ToLower(filepath.Ext(filename))
 	switch ext {
-	case ".png", ".jpg", ".jpeg", ".gif", ".webp", ".heic", ".bmp":
+	case ".png", ".jpg", ".jpeg", ".gif", ".webp", ".heic", ".bmp",
+		".pdf", ".txt", ".md", ".csv", ".json", ".html", ".docx", ".xlsx", ".pptx",
+		".zip", ".svg", ".mp3", ".wav", ".m4a", ".mp4", ".mov":
 		return ext
 	default:
 		return ".bin"

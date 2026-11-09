@@ -258,3 +258,9 @@
 .hljs-subst {
   color: var(--foreground);
 }
+
+/* Rows holding Persian/Arabic text (marked in Terminal.tsx): plain inline
+   spans let the browser order RTL words and join their letters. */
+.xterm .xterm-rows > div.od-rtl-row span {
+  display: inline !important;
+}

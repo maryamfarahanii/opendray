@@ -3,6 +3,7 @@ import { Link, useRouterState } from '@tanstack/react-router'
 import { useQuery } from '@tanstack/react-query'
 import {
   Layers,
+  MessageCircle,
   Cpu,
   MessageSquare,
   Plug,
@@ -58,6 +59,7 @@ interface NavItem {
 //   3. Platform  — extensions, config, help
 const groups: NavItem[][] = [
   [
+    { to: '/chat', icon: MessageCircle, labelKey: 'nav.chat', shortcut: 'g h' },
     { to: '/sessions', icon: Layers, labelKey: 'nav.sessions', shortcut: 'g s' },
     // Cortex — the unified Memory → Notes → Knowledge module. One
     // entry; the three rungs are layered inside (they are one loop,

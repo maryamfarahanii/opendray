@@ -53,13 +53,21 @@ func (m *Manager) pumpStdout(rs *runningSession) {
 			// rateLimitScanCooldown, so the regex below isn't run on
 			// every chunk.
 			if m.claudeAccounts != nil && m.autoFailoverEnabled {
-				if rs.appendRateLimitWindow(chunk, now) {
-					rs.sessMu.RLock()
-					isClaude := rs.sess.ProviderID == "claude"
-					rs.sessMu.RUnlock()
-					if isClaude {
-						m.tryRateLimitFailover(rs, now)
-					}
+				rs.sessMu.RLock()
+				isClaude := rs.sess.ProviderID == "claude"
+				rs.sessMu.RUnlock()
+				scan, trailingIn := rs.appendRateLimitWindow(chunk, now)
+				if isClaude && scan {
+					// Off the pump goroutine: the switch stops this
+					// process, which needs its PTY drained meanwhile.
+					go m.tryRateLimitFailover(rs, now)
+				} else if isClaude && trailingIn > 0 {
+					time.AfterFunc(trailingIn, func() {
+						at := time.Now()
+						if rs.startTrailingRateLimitScan(at) {
+							m.tryRateLimitFailover(rs, at)
+						}
+					})
 				}
 			}
 		}

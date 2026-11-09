@@ -28,6 +28,7 @@
     "errorFallback": "登录失败"
   },
   "nav": {
+    "chat": "Chat",
     "sessions": "会话",
     "memory": "记忆",
     "more": "更多",
